@@ -85,7 +85,7 @@ Install-Edge
         Write-Output "✔ Finished on $vm."
     }
     catch {
-        Write-Output "❌ Failed on $vm: $_"
+         Write-Output "❌ Failed on $vm."
     }
 }
 
