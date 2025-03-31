@@ -26,7 +26,7 @@ param (
 Import-Module Az.Compute
 
 foreach ($vm in $VMNames) {
-    Write-Output "⏳ Starting browser update on VM: $vm"
+    Write-Output "Starting browser update on VM: $vm"
 
     $inlineScript = @"
 Set-ExecutionPolicy Bypass -Scope Process -Force
@@ -52,13 +52,13 @@ function Update-Chrome {
         foreach (`$updater in `$updaterPaths) {
             if (Test-Path `$updater) {
                 Start-Process `$updater -ArgumentList "/ua /installsource scheduler" -Wait
-                Write-Output "🔄 Chrome update triggered."
+                Write-Output "Chrome update triggered."
                 return
             }
         }
-        Write-Output "⚠️ Chrome found, but updater not found."
+        Write-Output "Chrome found, but updater not found."
     } else {
-        Write-Output "ℹ️ Chrome not installed."
+        Write-Output "Chrome not installed."
     }
 }
 
@@ -68,7 +68,7 @@ function Install-Edge {
     Invoke-WebRequest -Uri `$installerUrl -OutFile `$tempFile -UseBasicParsing
     Start-Process msiexec.exe -ArgumentList \"/i `"`$tempFile`" /quiet /norestart\" -Wait
     Remove-Item `$tempFile -Force
-    Write-Output "✅ Microsoft Edge installed or updated successfully."
+    Write-Output "Microsoft Edge installed or updated successfully."
 }
 
 Update-Chrome
@@ -82,14 +82,14 @@ Install-Edge
         foreach ($msg in $result.Value) {
             Write-Output "$($msg.Message)"
         }
-        Write-Output "✔ Finished on $vm."
+        Write-Output "Finished on $vm."
     }
     catch {
-         Write-Output "❌ Failed on $vm."
+         Write-Output "Failed on $vm."
     }
 }
 
-Write-Output "🏁 Runbook complete."
+Write-Output "Runbook complete."
 
 
 Write-Output "All actions logged to Azure Automation job output."
