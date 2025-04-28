@@ -1,18 +1,18 @@
 <#
 .SYNOPSIS
-    Azure Runbook: Install/update Edge and update Chrome on multiple Azure VMs using Invoke-AzVMRunCommand
+    Azure Runbook: Remove Chrome and install/update Edge on multiple Azure VMs using Invoke-AzVMRunCommand.
 
 .DESCRIPTION
     This runbook:
-    - Checks for Google Chrome and runs the updater if present
+    - Checks for Google Chrome and uninstalls it if present
     - Downloads and installs Microsoft Edge Enterprise silently
     - Runs inside multiple Azure VMs using Invoke-AzVMRunCommand
 
 .PARAMETER VMNames
-    Array of VM names to target
+    Array of VM names to target.
 
 .PARAMETER ResourceGroupName
-    Azure resource group containing the VMs
+    Azure resource group containing the VMs.
 #>
 
 param (
@@ -32,46 +32,98 @@ foreach ($vm in $VMNames) {
 Set-ExecutionPolicy Bypass -Scope Process -Force
 `$ProgressPreference = 'SilentlyContinue'
 
-function Update-Chrome {
-    `$chromePaths = @(
+function Test-ChromeInstalled {
+    `$paths = @(
         `"$env:ProgramFiles(x86)\Google\Chrome\Application\chrome.exe`",
         `"$env:ProgramFiles\Google\Chrome\Application\chrome.exe`"
     )
-    `$found = `$false
-    foreach (`$path in `$chromePaths) {
+    foreach (`$path in `$paths) {
         if (Test-Path `$path) {
-            `$found = `$true
+            return `$true
+        }
+    }
+    return `$false
+}
+
+function Remove-Chrome {
+    Write-Output "Attempting to uninstall Chrome..."
+    `$uninstallKeyPaths = @(
+        "HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall",
+        "HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall"
+    )
+
+    foreach (`$keyPath in `$uninstallKeyPaths) {
+        Get-ChildItem `$keyPath -ErrorAction SilentlyContinue | ForEach-Object {
+            `$displayName = (Get-ItemProperty \$_ -ErrorAction SilentlyContinue).DisplayName
+            if (`$displayName -like "*Google Chrome*") {
+                `$uninstallString = (Get-ItemProperty \$_).UninstallString
+                if (`$uninstallString) {
+                    Write-Output "Found Chrome uninstall string: `$uninstallString"
+                    if (`$uninstallString -match "msiexec") {
+                        Start-Process msiexec.exe -ArgumentList "/x `$(`$_.PSChildName) /quiet /norestart" -Wait
+                    } else {
+                        Start-Process "cmd.exe" -ArgumentList "/c `"`$uninstallString /silent /norestart`"" -Wait
+                    }
+                    Write-Output "Chrome uninstallation triggered."
+                    return
+                }
+            }
         }
     }
 
-    if (`$found) {
-        `$updaterPaths = @(
-            `"$env:ProgramFiles(x86)\Google\Update\GoogleUpdate.exe`",
-            `"$env:ProgramFiles\Google\Update\GoogleUpdate.exe`"
-        )
-        foreach (`$updater in `$updaterPaths) {
-            if (Test-Path `$updater) {
-                Start-Process `$updater -ArgumentList "/ua /installsource scheduler" -Wait
-                Write-Output "Chrome update triggered."
-                return
-            }
-        }
-        Write-Output "Chrome found, but updater not found."
-    } else {
-        Write-Output "Chrome not installed."
-    }
+    Write-Output "Chrome uninstall information not found."
 }
 
 function Install-Edge {
-    `$installerUrl = 'https://go.microsoft.com/fwlink/?linkid=2135547'
-    `$tempFile = `"$env:TEMP\MicrosoftEdgeEnterpriseX64.msi`"
-    Invoke-WebRequest -Uri `$installerUrl -OutFile `$tempFile -UseBasicParsing
-    Start-Process msiexec.exe -ArgumentList \"/i `"`$tempFile`" /quiet /norestart\" -Wait
-    Remove-Item `$tempFile -Force
-    Write-Output "Microsoft Edge installed or updated successfully."
+    try {
+        `$api = 'https://edgeupdates.microsoft.com/api/products?view=enterprise'
+        `$temp = "`$env:TEMP"
+        `$channel = "Stable"
+        `$arch = "x64"
+        `$platform = "Windows"
+
+        Write-Output "Fetching Edge download info..."
+        `$response = Invoke-WebRequest -Uri `$api -UseBasicParsing
+        `$json = `$response.Content | ConvertFrom-Json
+
+        `$release = `$json | Where-Object { `$_.Product -eq `$channel } |
+            Select-Object -ExpandProperty Releases |
+            Where-Object { `$_.Architecture -eq `$arch -and `$_.Platform -eq `$platform } |
+            Sort-Object ProductVersion -Descending |
+            Select-Object -First 1
+
+        if (`$release -eq `$null) {
+            Write-Output "No Edge release found."
+            return
+        }
+
+        `$artifact = `$release.Artifacts | Select-Object -First 1
+        `$msiUrl = `$artifact.Location
+        `$msiPath = Join-Path `$temp (Split-Path `$msiUrl -Leaf)
+
+        Write-Output "Downloading Edge installer..."
+        Invoke-WebRequest -Uri `$msiUrl -OutFile `$msiPath -UseBasicParsing
+
+        Write-Output "Installing Edge silently..."
+        Start-Process msiexec.exe -ArgumentList "/i `"`$msiPath`" /quiet /norestart" -Wait
+
+        Write-Output "Edge installed successfully."
+
+        # Clean up
+        Remove-Item `$msiPath -Force
+    }
+    catch {
+        Write-Output "Error during Edge installation: `$($_.Exception.Message)"
+    }
 }
 
-Update-Chrome
+if (Test-ChromeInstalled) {
+    Write-Output "Chrome detected."
+    Remove-Chrome
+} else {
+    Write-Output "Chrome not installed."
+}
+
 Install-Edge
 "@
 
@@ -85,11 +137,9 @@ Install-Edge
         Write-Output "Finished on $vm."
     }
     catch {
-         Write-Output "Failed on $vm."
+        Write-Output "Failed on $vm. Error: $_"
     }
 }
 
 Write-Output "Runbook complete."
-
-
 Write-Output "All actions logged to Azure Automation job output."
