@@ -97,7 +97,7 @@ function Install-Edge {
             Sort-Object ProductVersion -Descending |
             Select-Object -First 1
 
-        if ($release -eq $null) {
+        if ($null -eq $release) {
             Write-Log "No Edge release found. Aborting."
             return
         }
